@@ -17,8 +17,8 @@ MIST is a collaborative markdown editor — a cross between GitHub Gist and Goog
 
 ## Tech Stack
 
-- **Backend:** Cloudflare Workers + Durable Objects (SQLite storage)
-- **Frontend:** React Router 7 (SSR) + Cloudflare Agents SDK
+- **Backend:** Bun (built-in HTTP server, WebSocket, SQLite via `bun:sqlite`)
+- **Frontend:** React Router 7 (SSR)
 - **Editor:** TipTap 3 + Yjs (CRDT multiplayer)
 - **Styling:** Tailwind CSS 4
 - **Language:** TypeScript (strict mode)
@@ -26,29 +26,25 @@ MIST is a collaborative markdown editor — a cross between GitHub Gist and Goog
 
 ## Prerequisites
 
-Requires Node.js 22+ (see `.nvmrc`). Before running commands:
-
-```bash
-source ~/.nvm/nvm.sh && nvm use
-```
+Requires [Bun](https://bun.sh/) 1.x.
 
 ## Commands
 
 ```bash
-npm run dev          # Local development server
-npm run build        # Production build
-npm run deploy       # Build and deploy to Cloudflare Workers
-npm run typecheck    # Full TypeScript type checking (runs cf-typegen + react-router typegen + tsc)
-npm run lint         # ESLint
-npm run test         # Vitest with coverage
-npm run test:watch   # Vitest in watch mode
-npm run cf-typegen   # Generate Cloudflare Worker types
+bun run dev          # Local development server
+bun run build        # Production build
+bun run start        # Start Bun production server
+bun run preview      # Build + start
+bun run typecheck    # TypeScript type checking
+bun run lint         # ESLint
+bun run test         # Vitest with coverage
+bun run test:watch   # Vitest in watch mode
 
 # Run a single test file
-npx vitest run tests/unit/lib/critic-parser.test.ts
+bunx vitest run tests/unit/lib/critic-parser.test.ts
 
 # Run tests matching a pattern
-npx vitest run -t "pattern"
+bunx vitest run -t "pattern"
 ```
 
 ## Architecture
@@ -57,12 +53,13 @@ See `docs/technical-architecture.md` for full details.
 
 ### Directory Layout
 
-- `agents/` — Server-side Durable Object agents (currently just `DocumentAgent`)
+- `server/index.ts` — Bun server entry point (`Bun.serve()` with HTTP + WebSocket)
+- `server/rooms.ts` — Document room management (Yjs sync, `bun:sqlite` persistence, auto-expiry)
+- `agents/` — Original Durable Object agent (kept for reference)
 - `app/components/` — React UI components
 - `app/lib/` — Editor logic, CriticMarkup, Yjs provider, utilities
 - `app/shared/` — Constants and types shared between client and server
 - `app/routes/` — File-based routing (`home.tsx`, `docs.$id.tsx`, `new.ts`)
-- `workers/app.ts` — Cloudflare Worker entry point
 - `tests/` — Unit tests (`tests/unit/`) and integration tests (`tests/integration/`)
 
 ### Import Path Alias
@@ -71,16 +68,16 @@ See `docs/technical-architecture.md` for full details.
 
 ### Critical Rule: Server/Client Separation
 
-Client-side React components must **never** import from `agents/`. The `agents` package uses `cloudflare:` protocol imports that don't exist in the browser. Use `app/shared/` for types needed by both sides.
+Client-side React components must **never** import from `server/`. Server modules use `bun:sqlite` and other server-only APIs that don't exist in the browser. Use `app/shared/` for types needed by both sides.
 
 ### Real-Time Collaboration Flow
 
 The multiplayer system works as follows:
 
-1. **`DocumentAgent`** (`agents/document.ts`) — a Durable Object that holds a Yjs `Y.Doc` in memory, persists state to SQLite on every update, and relays Yjs sync/awareness messages between connected WebSocket clients.
-2. **`yjs-provider.ts`** (`app/lib/`) — client-side WebSocket provider that connects to the agent at `/agents/document-agent/:docId` and handles Yjs sync protocol encoding/decoding.
+1. **`server/rooms.ts`** — manages in-memory document rooms, each holding a Yjs `Y.Doc`, persists state to SQLite on every update, and relays Yjs sync/awareness messages between connected WebSocket clients.
+2. **`yjs-provider.ts`** (`app/lib/`) — client-side WebSocket provider that connects to the server at `/ws/:docId` and handles Yjs sync protocol encoding/decoding.
 3. **TipTap** uses `@tiptap/extension-collaboration` (bound to the Yjs doc's `XmlFragment`) and `@tiptap/extension-collaboration-caret` for cursor awareness.
-4. **Worker entry** (`workers/app.ts`) — `routeAgentRequest()` intercepts `/agents/:agent/:name` requests before React Router handles the rest.
+4. **Server entry** (`server/index.ts`) — `Bun.serve()` routes WebSocket upgrades to room handlers, REST API calls to room management, and everything else to React Router SSR.
 
 ### CriticMarkup / Suggest Mode
 
@@ -94,7 +91,7 @@ Track-changes functionality spans multiple files:
 
 ### Testing Constraints
 
-- The `agents` package uses `cloudflare:` imports — it **cannot** be imported in plain Vitest. Test agent logic through integration tests or mock the imports. Unit tests should focus on pure logic in `app/lib/` and `app/shared/`.
+- Server modules use `bun:sqlite` — integration tests mock this import. Unit tests should focus on pure logic in `app/lib/` and `app/shared/`.
 - Coverage thresholds ramp linearly from 0% to 80% between Feb–Dec 2026 (see `vitest.config.ts`).
 - Tests live in `tests/unit/` and `tests/integration/`, mirroring the source structure.
 

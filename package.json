@@ -7,7 +7,7 @@
 		"dev": "react-router dev",
 		"start": "bun run server/index.ts",
 		"lint": "eslint .",
-		"preview": "npm run build && bun run server/index.ts",
+		"preview": "bun run build && bun run server/index.ts",
 		"test": "vitest run --coverage",
 		"test:watch": "vitest",
 		"typecheck": "react-router typegen && tsc -b"

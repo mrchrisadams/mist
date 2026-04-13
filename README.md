@@ -40,7 +40,6 @@ Everything is public by URL. Documents persist live with no save button. Multipl
 ### Prerequisites
 
 - [Bun](https://bun.sh/) 1.x (`curl -fsSL https://bun.sh/install | bash`)
-- Node.js 22+ (for the Vite build toolchain and tests)
 
 ### Setup
 
@@ -48,26 +47,26 @@ Everything is public by URL. Documents persist live with no save button. Multipl
 git clone https://github.com/mrchrisadams/mist.git
 cd mist
 git checkout ca-mist-bun
-npm install
+bun install
 ```
 
 ### Development
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 ### Production
 
 ```bash
-npm run build          # Build the React Router app
+bun run build          # Build the React Router app
 bun run server/index.ts # Start the Bun server
 ```
 
 Or in one step:
 
 ```bash
-npm run preview
+bun run preview
 ```
 
 The server listens on port 8000 by default. Set `PORT` env var to change it.
@@ -77,14 +76,14 @@ Data is stored in `./data/mist.db` (SQLite, created automatically).
 ### Commands
 
 ```bash
-npm run dev          # Local development server (Vite)
-npm run build        # Production build
-npm run start        # Start Bun production server
-npm run preview      # Build + start
-npm run typecheck    # TypeScript type checking
-npm run lint         # ESLint
-npm run test         # Vitest with coverage
-npm run test:watch   # Vitest in watch mode
+bun run dev          # Local development server (Vite)
+bun run build        # Production build
+bun run start        # Start Bun production server
+bun run preview      # Build + start
+bun run typecheck    # TypeScript type checking
+bun run lint         # ESLint
+bun run test         # Vitest with coverage
+bun run test:watch   # Vitest in watch mode
 ```
 
 ## Project structure
