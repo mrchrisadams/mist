@@ -27,7 +27,7 @@ export function useYjsEditor(docId: string) {
   const user = useMemo(() => randomUserInfo(), []);
   const docState = useMemo(() => doc.getMap<string>("docState"), [doc]);
   const providerRef = useRef<YjsProvider | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [socket, setSocket] = useState<WebSocket | null>(null);
   const [synced, setSynced] = useState(false);
   const [mode, setModeState] = useState<DocMode>("edit");
   const [isOnboarding, setIsOnboarding] = useState(false);
@@ -62,7 +62,7 @@ export function useYjsEditor(docId: string) {
     if (!url) return;
 
     const ws = new WebSocket(url);
-    wsRef.current = ws;
+    setSocket(ws);
 
     const onOpen = () => {
       const provider = new YjsProvider(ws, doc, awareness, setSynced);
@@ -80,13 +80,10 @@ export function useYjsEditor(docId: string) {
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
-      wsRef.current = null;
+      setSocket(null);
       setSynced(false);
     };
   }, [docId, doc, awareness]);
-
-  // Provide a socket-like value for compatibility (used by Editor SSR test)
-  const socket = wsRef.current;
 
   return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding };
 }
