@@ -14,8 +14,8 @@
 # Claude Code
 .claude/
 
-# Bun
-bun.lockb
+# Deno
+deno.lock
 
 # Coverage
 /coverage/

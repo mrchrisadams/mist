@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { Database } from "@db/sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import * as Y from "yjs";
@@ -6,8 +6,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
-import { MSG_SYNC, MSG_AWARENESS, DOCUMENT_TTL_MS, DOC_FORMAT_VERSION } from "../app/shared/constants";
-import type { ServerWebSocket } from "bun";
+import { MSG_SYNC, MSG_AWARENESS, DOCUMENT_TTL_MS, DOC_FORMAT_VERSION } from "../app/shared/constants.ts";
 
 export interface RoomWSData {
   docId: string;
@@ -16,7 +15,7 @@ export interface RoomWSData {
 interface DocumentRoom {
   doc: Y.Doc;
   awareness: awarenessProtocol.Awareness;
-  clients: Set<ServerWebSocket<RoomWSData>>;
+  clients: Set<WebSocket>;
   expiryTimer: ReturnType<typeof setTimeout>;
 }
 
@@ -26,8 +25,8 @@ let db: Database;
 export function initDB(dbPath = "./data/mist.db") {
   mkdirSync(dirname(dbPath), { recursive: true });
   db = new Database(dbPath);
-  db.run("PRAGMA journal_mode=WAL");
-  db.run(
+  db.exec("PRAGMA journal_mode=WAL");
+  db.exec(
     `CREATE TABLE IF NOT EXISTS doc_state (
       doc_id TEXT NOT NULL,
       key TEXT NOT NULL,
@@ -37,18 +36,17 @@ export function initDB(dbPath = "./data/mist.db") {
   );
 
   // Restore expiry timers for existing documents
-  const rows = db
-    .prepare("SELECT doc_id, value FROM doc_state WHERE key = 'createdAt'")
-    .all() as { doc_id: string; value: Buffer }[];
-  for (const row of rows) {
+  const stmt = db.prepare("SELECT doc_id, value FROM doc_state WHERE key = 'createdAt'");
+  for (const row of stmt) {
+    const { doc_id, value } = row as { doc_id: string; value: Uint8Array };
     const createdAt = new Float64Array(
-      row.value.buffer.slice(row.value.byteOffset, row.value.byteOffset + row.value.byteLength)
+      value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
     )[0];
     const remaining = createdAt + DOCUMENT_TTL_MS - Date.now();
     if (remaining <= 0) {
-      deleteDocument(row.doc_id);
+      deleteDocument(doc_id);
     } else {
-      scheduleExpiry(row.doc_id, remaining);
+      scheduleExpiry(doc_id, remaining);
     }
   }
 }
@@ -58,19 +56,13 @@ export function getDB(): Database {
 }
 
 function scheduleExpiry(docId: string, ms: number) {
-  // Clear any existing timer
   const existing = rooms.get(docId);
   if (existing?.expiryTimer) clearTimeout(existing.expiryTimer);
 
   const timer = setTimeout(() => deleteDocument(docId), ms);
-  // If a room exists in memory, attach the timer to it
   const room = rooms.get(docId);
   if (room) room.expiryTimer = timer;
-  // If no room yet, we'll create a placeholder timer reference
-  // by storing it — but actually the room may not exist yet.
-  // We store the timer on a temporary structure if needed.
   if (!room) {
-    // Store the timer so we can clear it if the room is created before it fires
     pendingTimers.set(docId, timer);
   }
 }
@@ -105,7 +97,7 @@ function getOrCreateRoom(docId: string): DocumentRoom {
   // Load persisted state
   const row = db
     .prepare("SELECT value FROM doc_state WHERE doc_id = ? AND key = 'state'")
-    .get(docId) as { value: Buffer } | null;
+    .get(docId) as { value: Uint8Array } | undefined;
   if (row?.value) {
     const state = new Uint8Array(
       row.value.buffer.slice(row.value.byteOffset, row.value.byteOffset + row.value.byteLength)
@@ -118,7 +110,7 @@ function getOrCreateRoom(docId: string): DocumentRoom {
     const state = Y.encodeStateAsUpdate(doc);
     db.prepare(
       "INSERT INTO doc_state (doc_id, key, value) VALUES (?, 'state', ?) ON CONFLICT(doc_id, key) DO UPDATE SET value = excluded.value"
-    ).run(docId, Buffer.from(state));
+    ).run(docId, state);
   });
 
   // Recover pending timer or create a dummy timer
@@ -126,7 +118,6 @@ function getOrCreateRoom(docId: string): DocumentRoom {
   if (expiryTimer) {
     pendingTimers.delete(docId);
   } else {
-    // No pending timer — set a far-future placeholder (will be replaced on POST)
     expiryTimer = setTimeout(() => {}, 2 ** 31 - 1);
   }
 
@@ -136,11 +127,11 @@ function getOrCreateRoom(docId: string): DocumentRoom {
 }
 
 /* ------------------------------------------------------------------ */
-/*  WebSocket handlers (called from Bun.serve websocket config)        */
+/*  WebSocket handlers                                                 */
 /* ------------------------------------------------------------------ */
 
-export function wsOpen(ws: ServerWebSocket<RoomWSData>) {
-  const { docId } = ws.data;
+export function wsOpen(ws: WebSocket) {
+  const docId = (ws as unknown as { _docId: string })._docId;
   const room = getOrCreateRoom(docId);
   room.clients.add(ws);
 
@@ -148,13 +139,13 @@ export function wsOpen(ws: ServerWebSocket<RoomWSData>) {
   const syncEncoder = encoding.createEncoder();
   encoding.writeVarUint(syncEncoder, MSG_SYNC);
   syncProtocol.writeSyncStep1(syncEncoder, room.doc);
-  ws.sendBinary(encoding.toUint8Array(syncEncoder));
+  ws.send(encoding.toUint8Array(syncEncoder));
 
   // Send SyncStep2 (full state)
   const stateEncoder = encoding.createEncoder();
   encoding.writeVarUint(stateEncoder, MSG_SYNC);
   syncProtocol.writeSyncStep2(stateEncoder, room.doc);
-  ws.sendBinary(encoding.toUint8Array(stateEncoder));
+  ws.send(encoding.toUint8Array(stateEncoder));
 
   // Send current awareness states
   const awarenessStates = room.awareness.getStates();
@@ -164,21 +155,21 @@ export function wsOpen(ws: ServerWebSocket<RoomWSData>) {
     const awarenessEncoder = encoding.createEncoder();
     encoding.writeVarUint(awarenessEncoder, MSG_AWARENESS);
     encoding.writeVarUint8Array(awarenessEncoder, update);
-    ws.sendBinary(encoding.toUint8Array(awarenessEncoder));
+    ws.send(encoding.toUint8Array(awarenessEncoder));
   }
 }
 
 export function wsMessage(
-  ws: ServerWebSocket<RoomWSData>,
-  message: string | Buffer,
+  ws: WebSocket,
+  message: string | ArrayBuffer | Uint8Array,
 ) {
   if (typeof message === "string") return;
 
-  const { docId } = ws.data;
+  const docId = (ws as unknown as { _docId: string })._docId;
   const room = rooms.get(docId);
   if (!room) return;
 
-  const data = new Uint8Array(message);
+  const data = message instanceof ArrayBuffer ? new Uint8Array(message) : message;
   const decoder = decoding.createDecoder(data);
   const msgType = decoding.readVarUint(decoder);
 
@@ -189,13 +180,13 @@ export function wsMessage(
       syncProtocol.readSyncMessage(decoder, encoder, room.doc, null);
 
       if (encoding.length(encoder) > 1) {
-        ws.sendBinary(encoding.toUint8Array(encoder));
+        ws.send(encoding.toUint8Array(encoder));
       }
 
       // Broadcast to other clients
       for (const client of room.clients) {
         if (client !== ws) {
-          client.sendBinary(data);
+          client.send(data);
         }
       }
       break;
@@ -206,7 +197,7 @@ export function wsMessage(
 
       for (const client of room.clients) {
         if (client !== ws) {
-          client.sendBinary(data);
+          client.send(data);
         }
       }
       break;
@@ -214,15 +205,15 @@ export function wsMessage(
   }
 }
 
-export function wsClose(ws: ServerWebSocket<RoomWSData>) {
-  const { docId } = ws.data;
+export function wsClose(ws: WebSocket) {
+  const docId = (ws as unknown as { _docId: string })._docId;
   const room = rooms.get(docId);
   if (!room) return;
   room.clients.delete(ws);
 }
 
 /* ------------------------------------------------------------------ */
-/*  HTTP API (called from Bun.serve fetch handler)                     */
+/*  HTTP API                                                           */
 /* ------------------------------------------------------------------ */
 
 export async function createDocument(
@@ -234,7 +225,7 @@ export async function createDocument(
   // Mark as existing
   db.prepare(
     "INSERT INTO doc_state (doc_id, key, value) VALUES (?, 'exists', ?) ON CONFLICT(doc_id, key) DO UPDATE SET value = excluded.value"
-  ).run(docId, Buffer.from([1]));
+  ).run(docId, new Uint8Array([1]));
 
   // Stamp doc format version
   const meta = room.doc.getMap<number>("meta");
@@ -244,7 +235,7 @@ export async function createDocument(
 
   // Store creation timestamp and schedule auto-delete
   const now = Date.now();
-  const createdAtBuf = Buffer.from(new Float64Array([now]).buffer);
+  const createdAtBuf = new Uint8Array(new Float64Array([now]).buffer);
   db.prepare(
     "INSERT INTO doc_state (doc_id, key, value) VALUES (?, 'createdAt', ?) ON CONFLICT(doc_id, key) DO UPDATE SET value = excluded.value"
   ).run(docId, createdAtBuf);
@@ -264,7 +255,7 @@ export async function createDocument(
       };
       if (body.content) {
         const { parseCriticMarkupToContent } = await import(
-          "../app/lib/critic-parser"
+          "../app/lib/critic-parser.ts"
         );
         const frag = room.doc.getXmlFragment("default");
         if (frag.length === 0) {
@@ -309,7 +300,6 @@ export async function createDocument(
           },
         );
       }
-      // Ignore other malformed JSON — document is still created
     }
   }
 
@@ -319,19 +309,18 @@ export async function createDocument(
 }
 
 export function checkDocument(docId: string): Response {
-  // Ensure room is initialised so we can check the DB
   getOrCreateRoom(docId);
 
   const existsRow = db
     .prepare("SELECT value FROM doc_state WHERE doc_id = ? AND key = 'exists'")
-    .get(docId) as { value: Buffer } | null;
+    .get(docId) as { value: Uint8Array } | undefined;
   const exists = !!existsRow;
 
   const createdAtRow = db
     .prepare(
       "SELECT value FROM doc_state WHERE doc_id = ? AND key = 'createdAt'",
     )
-    .get(docId) as { value: Buffer } | null;
+    .get(docId) as { value: Uint8Array } | undefined;
   const createdAt = createdAtRow
     ? new Float64Array(
         createdAtRow.value.buffer.slice(

@@ -5,9 +5,9 @@
 	"scripts": {
 		"build": "react-router build",
 		"dev": "react-router dev",
-		"start": "bun run server/index.ts",
+		"start": "deno run -A --sloppy-imports server/index.ts",
 		"lint": "eslint .",
-		"preview": "bun run build && bun run server/index.ts",
+		"preview": "deno task build && deno task start",
 		"test": "vitest run --coverage",
 		"test:watch": "vitest",
 		"typecheck": "react-router typegen && tsc -b"

@@ -17,7 +17,7 @@ MIST is a collaborative markdown editor — a cross between GitHub Gist and Goog
 
 ## Tech Stack
 
-- **Backend:** Bun (built-in HTTP server, WebSocket, SQLite via `bun:sqlite`)
+- **Backend:** Deno 2.x (`Deno.serve()` HTTP server, `Deno.upgradeWebSocket()`, `@db/sqlite` from JSR)
 - **Frontend:** React Router 7 (SSR)
 - **Editor:** TipTap 3 + Yjs (CRDT multiplayer)
 - **Styling:** Tailwind CSS 4
@@ -26,25 +26,25 @@ MIST is a collaborative markdown editor — a cross between GitHub Gist and Goog
 
 ## Prerequisites
 
-Requires [Bun](https://bun.sh/) 1.x.
+Requires [Deno](https://deno.land/) 2.x.
 
 ## Commands
 
 ```bash
-bun run dev          # Local development server
-bun run build        # Production build
-bun run start        # Start Bun production server
-bun run preview      # Build + start
-bun run typecheck    # TypeScript type checking
-bun run lint         # ESLint
-bun run test         # Vitest with coverage
-bun run test:watch   # Vitest in watch mode
+deno task dev          # Local development server
+deno task build        # Production build
+deno task start        # Start Deno production server
+deno task preview      # Build + start
+deno task typecheck    # TypeScript type checking
+deno task lint         # ESLint
+deno task test         # Vitest with coverage
+deno task test:watch   # Vitest in watch mode
 
 # Run a single test file
-bunx vitest run tests/unit/lib/critic-parser.test.ts
+deno run -A node_modules/.bin/vitest run tests/unit/lib/critic-parser.test.ts
 
 # Run tests matching a pattern
-bunx vitest run -t "pattern"
+deno run -A node_modules/.bin/vitest run -t "pattern"
 ```
 
 ## Architecture
@@ -53,14 +53,15 @@ See `docs/technical-architecture.md` for full details.
 
 ### Directory Layout
 
-- `server/index.ts` — Bun server entry point (`Bun.serve()` with HTTP + WebSocket)
-- `server/rooms.ts` — Document room management (Yjs sync, `bun:sqlite` persistence, auto-expiry)
+- `server/index.ts` — Deno server entry point (`Deno.serve()` with HTTP + WebSocket)
+- `server/rooms.ts` — Document room management (Yjs sync, `@db/sqlite` persistence, auto-expiry)
 - `agents/` — Original Durable Object agent (kept for reference)
 - `app/components/` — React UI components
 - `app/lib/` — Editor logic, CriticMarkup, Yjs provider, utilities
 - `app/shared/` — Constants and types shared between client and server
 - `app/routes/` — File-based routing (`home.tsx`, `docs.$id.tsx`, `new.ts`)
 - `tests/` — Unit tests (`tests/unit/`) and integration tests (`tests/integration/`)
+- `scripts/` — Build and compatibility helper scripts
 
 ### Import Path Alias
 
@@ -68,7 +69,7 @@ See `docs/technical-architecture.md` for full details.
 
 ### Critical Rule: Server/Client Separation
 
-Client-side React components must **never** import from `server/`. Server modules use `bun:sqlite` and other server-only APIs that don't exist in the browser. Use `app/shared/` for types needed by both sides.
+Client-side React components must **never** import from `server/`. Server modules use `@db/sqlite` and other server-only APIs that don't exist in the browser. Use `app/shared/` for types needed by both sides.
 
 ### Real-Time Collaboration Flow
 
@@ -77,7 +78,7 @@ The multiplayer system works as follows:
 1. **`server/rooms.ts`** — manages in-memory document rooms, each holding a Yjs `Y.Doc`, persists state to SQLite on every update, and relays Yjs sync/awareness messages between connected WebSocket clients.
 2. **`yjs-provider.ts`** (`app/lib/`) — client-side WebSocket provider that connects to the server at `/ws/:docId` and handles Yjs sync protocol encoding/decoding.
 3. **TipTap** uses `@tiptap/extension-collaboration` (bound to the Yjs doc's `XmlFragment`) and `@tiptap/extension-collaboration-caret` for cursor awareness.
-4. **Server entry** (`server/index.ts`) — `Bun.serve()` routes WebSocket upgrades to room handlers, REST API calls to room management, and everything else to React Router SSR.
+4. **Server entry** (`server/index.ts`) — `Deno.serve()` routes WebSocket upgrades to room handlers via `Deno.upgradeWebSocket()`, REST API calls to room management, and everything else to React Router SSR.
 
 ### CriticMarkup / Suggest Mode
 
@@ -91,7 +92,7 @@ Track-changes functionality spans multiple files:
 
 ### Testing Constraints
 
-- Server modules use `bun:sqlite` — integration tests mock this import. Unit tests should focus on pure logic in `app/lib/` and `app/shared/`.
+- Server modules use `@db/sqlite` — integration tests mock this import. Unit tests should focus on pure logic in `app/lib/` and `app/shared/`.
 - Coverage thresholds ramp linearly from 0% to 80% between Feb–Dec 2026 (see `vitest.config.ts`).
 - Tests live in `tests/unit/` and `tests/integration/`, mirroring the source structure.
 

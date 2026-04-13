@@ -35,7 +35,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const id = generateDocumentId();
 
-    // Create document via the /agents/document-agent/:id API (handled by our Bun server)
+    // Create document via the /agents/document-agent/:id API (handled by our Deno server)
     const init: RequestInit = { method: "POST" };
 
     if (content.trim()) {

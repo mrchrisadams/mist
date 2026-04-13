@@ -1,4 +1,4 @@
-import { resolve } from "path";
+import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 import tsconfigPaths from "vite-tsconfig-paths";
 
@@ -36,6 +36,12 @@ export default defineConfig({
   resolve: {
     alias: {
       "~": resolve(__dirname, "app"),
+      // Workaround: Deno's CJS resolver doesn't follow sub-directory
+      // package.json "main" fields correctly for react-remove-scroll-bar/constants
+      "react-remove-scroll-bar/constants": resolve(
+        __dirname,
+        "node_modules/react-remove-scroll-bar/dist/es5/constants.js",
+      ),
     },
   },
   test: {

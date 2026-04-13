@@ -1,7 +1,7 @@
 /**
  * DocumentAgent / Rooms integration tests.
  *
- * Tests the room management logic with a mocked bun:sqlite module.
+ * Tests the room management logic with a mocked @db/sqlite module.
  * The original agent tests tested DocumentAgent lifecycle methods;
  * these tests exercise the rooms.ts module functions through mock
  * WebSocket/SQLite wiring.
@@ -17,7 +17,7 @@ import { DOCUMENT_TTL_MS, DOC_FORMAT_VERSION } from "~/shared/constants";
 import { YjsProvider } from "~/lib/yjs-provider";
 
 /* ------------------------------------------------------------------ */
-/*  Mock bun:sqlite                                                    */
+/*  Mock @db/sqlite                                                    */
 /* ------------------------------------------------------------------ */
 
 let mockSqlStore: Map<string, ArrayBuffer>;
@@ -57,6 +57,7 @@ class MockStatement {
     }
   }
 
+  /** @db/sqlite returns rows as objects */
   get(...args: unknown[]) {
     if (this.query.includes("select") && this.query.includes("from doc_state")) {
       const docId = args[0] as string;
@@ -64,38 +65,36 @@ class MockStatement {
       if (keyMatch) {
         const storeKey = `${docId}:${keyMatch[1]}`;
         const buf = mockSqlStore.get(storeKey);
-        if (buf) return { value: Buffer.from(buf) };
+        if (buf) return { value: new Uint8Array(buf) };
       }
-      return null;
+      return undefined;
     }
-    return null;
+    return undefined;
   }
 
-  all() {
+  /** Iterator for SELECT queries (used by initDB for createdAt rows) */
+  [Symbol.iterator]() {
     if (this.query.includes("select") && this.query.includes("createdat")) {
-      const results: { doc_id: string; value: Buffer }[] = [];
+      const results: { doc_id: string; value: Uint8Array }[] = [];
       for (const [key, buf] of mockSqlStore) {
         if (key.endsWith(":createdAt")) {
-          results.push({
-            doc_id: key.split(":")[0],
-            value: Buffer.from(buf),
-          });
+          results.push({ doc_id: key.split(":")[0], value: new Uint8Array(buf) });
         }
       }
-      return results;
+      return results[Symbol.iterator]();
     }
-    return [];
+    return [][Symbol.iterator]();
   }
 }
 
 class MockDatabase {
-  run(_query: string) {}
+  exec(_query: string) {}
   prepare(query: string) {
     return new MockStatement(query);
   }
 }
 
-vi.mock("bun:sqlite", () => ({
+vi.mock("@db/sqlite", () => ({
   Database: MockDatabase,
 }));
 
@@ -135,18 +134,18 @@ Object.defineProperty(MockSocket.prototype, "OPEN", { value: 1 });
 Object.defineProperty(MockSocket.prototype, "CONNECTING", { value: 0 });
 
 /* ------------------------------------------------------------------ */
-/*  Mock ServerWebSocket (Bun-side)                                    */
+/*  Mock ServerWebSocket (Deno-side — uses _docId property)            */
 /* ------------------------------------------------------------------ */
 
 class MockServerWebSocket {
-  data: { docId: string };
+  _docId: string;
   closed = false;
   closeCode?: number;
   closeReason?: string;
   onSendBinary?: (data: Uint8Array) => void;
 
   constructor(docId: string) {
-    this.data = { docId };
+    this._docId = docId;
   }
 
   sendBinary(data: Uint8Array | ArrayBuffer) {
@@ -195,7 +194,7 @@ describe("DocumentAgent (rooms)", () => {
    * Connect a full Yjs client through the rooms module.
    *
    * Wiring:
-   *   server sends -> serverWs.sendBinary -> socket.receiveMessage -> YjsProvider
+   *   server sends -> serverWs.send -> socket.receiveMessage -> YjsProvider
    *   YjsProvider sends -> socket.send -> rooms.wsMessage(serverWs, ...)
    */
   function connectYjsClient(docId = "testdoc1") {
