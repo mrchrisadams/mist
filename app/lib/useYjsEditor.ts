@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import { useAgent } from "agents/react";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { YjsProvider } from "./yjs-provider";
@@ -16,20 +15,22 @@ function randomUserInfo(): UserInfo {
   };
 }
 
+function getWsUrl(docId: string): string {
+  if (typeof window === "undefined") return "";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/ws/${docId}`;
+}
+
 export function useYjsEditor(docId: string) {
   const doc = useMemo(() => new Y.Doc(), []);
   const awareness = useMemo(() => new Awareness(doc), [doc]);
   const user = useMemo(() => randomUserInfo(), []);
   const docState = useMemo(() => doc.getMap<string>("docState"), [doc]);
   const providerRef = useRef<YjsProvider | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const [synced, setSynced] = useState(false);
   const [mode, setModeState] = useState<DocMode>("edit");
   const [isOnboarding, setIsOnboarding] = useState(false);
-
-  const socket = useAgent({
-    agent: "document-agent",
-    name: docId,
-  });
 
   // Observe docState Y.Map for mode and onboarding changes from other clients
   useEffect(() => {
@@ -55,20 +56,37 @@ export function useYjsEditor(docId: string) {
     [docState],
   );
 
-  // Bridge socket to Yjs
+  // Connect WebSocket and bridge to Yjs
   useEffect(() => {
-    if (!socket) return;
+    const url = getWsUrl(docId);
+    if (!url) return;
 
-    const ws = socket as unknown as WebSocket;
-    const provider = new YjsProvider(ws, doc, awareness, setSynced);
-    providerRef.current = provider;
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    const onOpen = () => {
+      const provider = new YjsProvider(ws, doc, awareness, setSynced);
+      providerRef.current = provider;
+    };
+
+    ws.addEventListener("open", onOpen);
 
     return () => {
-      provider.destroy();
-      providerRef.current = null;
+      ws.removeEventListener("open", onOpen);
+      if (providerRef.current) {
+        providerRef.current.destroy();
+        providerRef.current = null;
+      }
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+      wsRef.current = null;
       setSynced(false);
     };
-  }, [socket, doc, awareness]);
+  }, [docId, doc, awareness]);
+
+  // Provide a socket-like value for compatibility (used by Editor SSR test)
+  const socket = wsRef.current;
 
   return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding };
 }

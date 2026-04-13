@@ -44,7 +44,7 @@ export default defineConfig({
     exclude: ["tests/evals/**"],
     coverage: {
       provider: "v8",
-      include: ["app/**/*.ts", "app/**/*.tsx", "agents/**/*.ts", "workers/**/*.ts"],
+      include: ["app/**/*.ts", "app/**/*.tsx", "server/**/*.ts"],
       exclude: ["**/*.test.ts", "**/*.d.ts"],
       thresholds: coverageThresholds(),
     },

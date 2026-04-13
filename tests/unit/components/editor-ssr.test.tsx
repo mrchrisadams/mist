@@ -11,7 +11,7 @@ function makeYjs() {
   return {
     doc,
     awareness,
-    socket: null as unknown as ReturnType<typeof import("agents/react").useAgent>,
+    socket: null as unknown as WebSocket,
     synced: false,
   };
 }

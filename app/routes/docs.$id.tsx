@@ -1,8 +1,6 @@
 import { data, Link } from "react-router";
 import type { Route } from "./+types/docs.$id";
-import { getAgentByName } from "agents";
 import { isValidDocumentId, DOCUMENT_TTL_MS } from "~/shared/constants";
-import { getCloudflare } from "~/lib/cloudflare.server";
 import { useYjsEditor } from "~/lib/useYjsEditor";
 import { DocumentProvider, useDocument } from "~/lib/DocumentContext";
 import Editor from "~/components/Editor";
@@ -23,15 +21,16 @@ export function meta(_args: Route.MetaArgs) {
   return [{ title: "mist" }];
 }
 
-export async function loader({ params, context }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
   const id = params.id;
   if (!isValidDocumentId(id)) {
     throw data(null, { status: 404 });
   }
 
-  const { env } = getCloudflare(context);
-  const stub = await getAgentByName(env.DocumentAgent, id);
-  const res = await stub.fetch(new Request("https://do/"));
+  // Check document existence via our own server API
+  const url = new URL(request.url);
+  const agentUrl = `${url.origin}/agents/document-agent/${id}`;
+  const res = await fetch(agentUrl);
   const { exists, createdAt } = (await res.json()) as {
     exists: boolean;
     createdAt: number | null;

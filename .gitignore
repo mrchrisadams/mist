@@ -6,18 +6,16 @@
 /.react-router/
 /build/
 
-# Cloudflare
-.mf
-.wrangler
-.dev.vars*
-worker-configuration.d.ts
-
-!.dev.vars.example
+# Data
+/data/
 .env*
 !.env.example
 
 # Claude Code
 .claude/
+
+# Bun
+bun.lockb
 
 # Coverage
 /coverage/

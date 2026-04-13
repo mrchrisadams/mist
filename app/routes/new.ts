@@ -1,8 +1,6 @@
 import { redirect } from "react-router";
-import { getAgentByName } from "agents";
 import type { Route } from "./+types/new";
 import { generateDocumentId } from "~/shared/constants";
-import { getCloudflare } from "~/lib/cloudflare.server";
 import { deserializeThreads } from "~/lib/thread-serialization";
 
 const MAX_CONTENT_BYTES = 1_000_000; // 1 MB
@@ -18,7 +16,7 @@ export function loader() {
   return redirect("/");
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
+export async function action({ request }: Route.ActionArgs) {
   try {
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_CONTENT_BYTES) {
@@ -36,9 +34,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
 
     const id = generateDocumentId();
-    const { env } = getCloudflare(context);
-    const stub = await getAgentByName(env.DocumentAgent, id);
 
+    // Create document via the /agents/document-agent/:id API (handled by our Bun server)
     const init: RequestInit = { method: "POST" };
 
     if (content.trim()) {
@@ -47,7 +44,9 @@ export async function action({ request, context }: Route.ActionArgs) {
       init.body = JSON.stringify({ content: body, threads });
     }
 
-    const res = await stub.fetch(new Request("https://do/", init));
+    const url = new URL(request.url);
+    const agentUrl = `${url.origin}/agents/document-agent/${id}`;
+    const res = await fetch(agentUrl, init);
 
     if (!res.ok) {
       try {
@@ -58,7 +57,6 @@ export async function action({ request, context }: Route.ActionArgs) {
       }
     }
 
-    const url = new URL(request.url);
     return new Response(`${url.origin}/docs/${id}\n`, {
       status: 201,
       headers: { "Content-Type": "text/plain" },

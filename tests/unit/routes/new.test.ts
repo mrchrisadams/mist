@@ -4,19 +4,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /*  Mocks                                                              */
 /* ------------------------------------------------------------------ */
 
-const { mockAgentFetch } = vi.hoisted(() => ({
-  mockAgentFetch: vi.fn(),
-}));
-
-vi.mock("agents", () => ({
-  getAgentByName: vi.fn().mockResolvedValue({ fetch: mockAgentFetch }),
-}));
-
-vi.mock("~/lib/cloudflare.server", () => ({
-  getCloudflare: vi.fn().mockReturnValue({
-    env: { DocumentAgent: {} },
-  }),
-}));
+const mockFetch = vi.fn();
+vi.stubGlobal("fetch", mockFetch);
 
 vi.mock("~/shared/constants", async () => {
   const actual = await vi.importActual<typeof import("~/shared/constants")>(
@@ -51,7 +40,6 @@ function putRequest(body: string) {
   return new Request("https://mist.example.com/new", { method: "PUT", body });
 }
 
-// The action's second argument — context is passed to getCloudflare which is mocked
 const context = {} as Parameters<typeof action>[0]["context"];
 
 /* ------------------------------------------------------------------ */
@@ -69,7 +57,7 @@ describe("GET /new (loader)", () => {
 describe("POST /new (action)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAgentFetch.mockResolvedValue(
+    mockFetch.mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
   });
@@ -94,15 +82,16 @@ describe("POST /new (action)", () => {
     expect(text).toContain("/docs/abcd1234");
   });
 
-  it("creates document via agent with content", async () => {
+  it("creates document via fetch with content", async () => {
     const request = postRequest("# Test");
     await action({ request, context } as Parameters<typeof action>[0]);
 
-    expect(mockAgentFetch).toHaveBeenCalledOnce();
-    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    expect(agentRequest.method).toBe("POST");
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://mist.example.com/agents/document-agent/abcd1234");
+    expect(init.method).toBe("POST");
 
-    const body = await agentRequest.json();
+    const body = JSON.parse(init.body as string);
     expect(body.content).toBe("# Test");
   });
 
@@ -115,8 +104,7 @@ describe("POST /new (action)", () => {
     const text = await response.text();
     expect(text).toContain("/docs/abcd1234");
 
-    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    const body = await agentRequest.json();
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
     expect(body.content).toBe("# Uploaded\n\nBody text.\n");
   });
 
@@ -125,8 +113,7 @@ describe("POST /new (action)", () => {
     const request = postRequest(md);
     await action({ request, context } as Parameters<typeof action>[0]);
 
-    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    const body = await agentRequest.json();
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
     expect(body.content).toBe("# Title\n\nParagraph one.\n\nParagraph two.\n");
   });
 
@@ -134,9 +121,9 @@ describe("POST /new (action)", () => {
     const request = postRequest("   ");
     await action({ request, context } as Parameters<typeof action>[0]);
 
-    expect(mockAgentFetch).toHaveBeenCalledOnce();
-    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    expect(agentRequest.headers.get("Content-Type")).toBeNull();
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [, init] = mockFetch.mock.calls[0];
+    expect(init.headers).toBeUndefined();
   });
 
   it("strips frontmatter and passes threads to agent", async () => {
@@ -155,8 +142,7 @@ mist:
     const request = postRequest(md);
     await action({ request, context } as Parameters<typeof action>[0]);
 
-    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    const body = await agentRequest.json();
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
     expect(body.content).toBe("# Doc with threads\n");
     expect(body.threads).toHaveLength(1);
     expect(body.threads[0].commentText).toBe("Nice");
@@ -169,7 +155,7 @@ mist:
     expect(response.status).toBe(400);
     const text = await response.text();
     expect(text).toContain("binary");
-    expect(mockAgentFetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("returns 413 when content exceeds 1MB", async () => {
@@ -180,7 +166,7 @@ mist:
     expect(response.status).toBe(413);
     const text = await response.text();
     expect(text).toContain("too large");
-    expect(mockAgentFetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("returns 413 when content-length header exceeds 1MB", async () => {
@@ -192,11 +178,11 @@ mist:
     expect(response.status).toBe(413);
     const text = await response.text();
     expect(text).toContain("too large");
-    expect(mockAgentFetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("relays agent error message on 400 response", async () => {
-    mockAgentFetch.mockResolvedValue(
+    mockFetch.mockResolvedValue(
       new Response(
         JSON.stringify({ ok: false, error: "Unsupported CriticMarkup: substitution" }),
         { status: 400 },
@@ -212,7 +198,7 @@ mist:
   });
 
   it("returns generic error when agent fails with non-JSON response", async () => {
-    mockAgentFetch.mockResolvedValue(
+    mockFetch.mockResolvedValue(
       new Response("Internal Server Error", { status: 500 }),
     );
 
@@ -225,7 +211,7 @@ mist:
   });
 
   it("returns 500 on unexpected error", async () => {
-    mockAgentFetch.mockRejectedValue(new Error("network failure"));
+    mockFetch.mockRejectedValue(new Error("network failure"));
 
     const request = postRequest("some content");
     const response = await action({ request, context } as Parameters<typeof action>[0]);
