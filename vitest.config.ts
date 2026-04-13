@@ -36,18 +36,13 @@ export default defineConfig({
   resolve: {
     alias: {
       "~": resolve(__dirname, "app"),
-      // Workaround: Deno's CJS resolver doesn't follow sub-directory
-      // package.json "main" fields correctly for react-remove-scroll-bar/constants
-      "react-remove-scroll-bar/constants": resolve(
-        __dirname,
-        "node_modules/react-remove-scroll-bar/dist/es5/constants.js",
-      ),
     },
   },
   test: {
     globals: true,
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     exclude: ["tests/evals/**"],
+
     coverage: {
       provider: "v8",
       include: ["app/**/*.ts", "app/**/*.tsx", "server/**/*.ts"],

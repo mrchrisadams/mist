@@ -10,7 +10,8 @@
 		"preview": "deno task build && deno task start",
 		"test": "vitest run --coverage",
 		"test:watch": "vitest",
-		"typecheck": "react-router typegen && tsc -b"
+		"typecheck": "react-router typegen && tsc -b",
+		"postinstall": "node scripts/patch-deno-compat.mjs"
 	},
 	"dependencies": {
 		"@radix-ui/react-dropdown-menu": "^2.1.16",

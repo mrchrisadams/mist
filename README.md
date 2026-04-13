@@ -50,7 +50,6 @@ git clone https://github.com/mrchrisadams/mist.git
 cd mist
 git checkout ca-mist-deno
 npm install                 # Deno reads package.json; npm creates node_modules
-bash scripts/patch-deno-compat.sh  # Fix CJS sub-path resolution for Deno
 ```
 
 ### Development
@@ -118,7 +117,7 @@ The server runs with `--sloppy-imports` because the existing app code uses TypeS
 
 ### CJS sub-path workaround
 
-`scripts/patch-deno-compat.sh` fixes a Deno CJS resolution issue where sub-directory `package.json` files with relative `main` fields aren't followed correctly. This affects `react-remove-scroll-bar/constants` (a transitive dependency of Radix UI). Run it after `npm install`.
+A `postinstall` script (`scripts/patch-deno-compat.mjs`) runs automatically on `npm install` to fix a Deno CJS resolution issue where sub-directory `package.json` files with relative `main` fields aren't followed correctly. This affects `react-remove-scroll-bar/constants` (a transitive dependency of Radix UI). See [denoland/deno#27702](https://github.com/denoland/deno/issues/27702).
 
 ## Licence
 
