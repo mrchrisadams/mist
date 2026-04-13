@@ -92,6 +92,46 @@ export function suggestModePlugin(docState: ModeSource): Plugin {
         return true;
       },
 
+      handlePaste(view, _event, slice) {
+        const mode = docState.get("mode");
+        if (mode !== "suggest") return false;
+
+        const { state, dispatch } = view;
+        const additionType = state.schema.marks.criticAddition;
+        const deletionType = state.schema.marks.criticDeletion;
+        if (!additionType || !deletionType) return false;
+
+        const { from, to } = state.selection;
+        const tr = state.tr;
+
+        if (from !== to) {
+          if (rangeHasOnlyMark(state, from, to, "criticAddition")) {
+            // Replacing inside an addition — delete the old text
+            tr.delete(from, to);
+          } else {
+            // Mark selected text as deleted
+            tr.addMark(from, to, deletionType.create());
+          }
+        }
+
+        // Insert point: after deletions (which stay in place), or at cursor
+        const insertAt = from !== to && !rangeHasOnlyMark(state, from, to, "criticAddition") ? to : from;
+
+        // Insert the pasted slice
+        tr.replaceRange(insertAt, insertAt, slice);
+
+        // The inserted content spans from insertAt to the new cursor pos.
+        // Calculate the end of inserted content using the slice size.
+        const insertEnd = insertAt + slice.content.size - slice.openStart - slice.openEnd;
+
+        // Apply criticAddition mark to all text in the inserted range
+        tr.addMark(insertAt, insertEnd, additionType.create());
+        tr.setSelection(TextSelection.near(tr.doc.resolve(insertEnd)));
+
+        dispatch(tr);
+        return true;
+      },
+
       handleKeyDown(view, event) {
         const mode = docState.get("mode");
         if (mode !== "suggest") return false;

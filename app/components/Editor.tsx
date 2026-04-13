@@ -3,6 +3,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import { Extension, getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Slice, Fragment } from "@tiptap/pm/model";
 import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
@@ -29,6 +30,35 @@ const SuggestMode = Extension.create<{ docState: ReturnType<typeof useYjsEditor>
   addProseMirrorPlugins() {
     if (!this.options.docState) return [];
     return [suggestModePlugin(this.options.docState)];
+  },
+});
+
+/**
+ * Overrides ProseMirror's default clipboard text parser so that every
+ * newline in pasted plain-text creates a new paragraph.  The default
+ * behaviour only splits on double-newlines (treating single newlines
+ * as spaces), which destroys line breaks in markdown, code, and any
+ * other line-oriented content.
+ */
+const PreserveNewlines = Extension.create({
+  name: "preserveNewlines",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey("preserveNewlines"),
+        props: {
+          clipboardTextParser(text, $context, _plain, _view) {
+            const schema = $context.parent.type.schema;
+            const paragraphType = schema.nodes.paragraph;
+            const lines = text.split(/\r?\n/);
+            const nodes = lines.map((line) =>
+              paragraphType.createAndFill({}, line ? schema.text(line) : undefined)!
+            );
+            return new Slice(Fragment.from(nodes), 0, 0);
+          },
+        },
+      }),
+    ];
   },
 });
 
@@ -233,6 +263,7 @@ export default function Editor({
           render: renderCaret,
         }),
         MarkdownDecorations,
+        PreserveNewlines,
         SuggestMode.configure({ docState }),
         CommentClickHandler.configure({ onCommentClick }),
         CommentHighlight,

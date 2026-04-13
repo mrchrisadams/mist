@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
-import { Schema } from "@tiptap/pm/model";
+import { Schema, Slice, Fragment } from "@tiptap/pm/model";
 import { suggestModePlugin } from "~/lib/suggest-mode";
 
 const schema = new Schema({
@@ -380,6 +380,110 @@ describe("suggestModePlugin", () => {
         { key: "Backspace" } as KeyboardEvent,
       );
       expect(result).toBe(false);
+    });
+  });
+
+  describe("handlePaste in suggest mode", () => {
+    /** Build a Slice containing a single paragraph of text */
+    function textSlice(text: string): Slice {
+      const para = schema.node("paragraph", null, text ? [schema.text(text)] : []);
+      return new Slice(Fragment.from(para), 1, 1);
+    }
+
+    /** Build a Slice containing multiple paragraphs (simulating multi-line paste) */
+    function multiLineSlice(lines: string[]): Slice {
+      const paras = lines.map((line) =>
+        schema.node("paragraph", null, line ? [schema.text(line)] : []),
+      );
+      return new Slice(Fragment.from(paras), 1, 1);
+    }
+
+    it("applies criticAddition mark to pasted text", () => {
+      const state = createState("hello", 6);
+      const plugin = state.plugins[0];
+      let dispatched: EditorState | null = null;
+
+      const slice = textSlice(" world");
+      const result = plugin.props.handlePaste?.(
+        {
+          state,
+          dispatch: (tr) => { dispatched = state.apply(tr); },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        {} as ClipboardEvent,
+        slice,
+      );
+      expect(result).toBe(true);
+      expect(dispatched).not.toBeNull();
+      expect(dispatched!.doc.textContent).toBe("hello world");
+      // The pasted text should have criticAddition mark
+      expect(hasMarkAtPos(dispatched!, 6, "criticAddition")).toBe(true);
+    });
+
+    it("does not intercept paste in edit mode", () => {
+      const state = createEditModeState("hello");
+      const plugin = state.plugins[0];
+
+      const slice = textSlice(" world");
+      const result = plugin.props.handlePaste?.(
+        {
+          state,
+          dispatch: () => {},
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        {} as ClipboardEvent,
+        slice,
+      );
+      expect(result).toBe(false);
+    });
+
+    it("marks selected text as deletion when pasting over selection", () => {
+      const state = createState("hello world");
+      const plugin = state.plugins[0];
+      let dispatched: EditorState | null = null;
+
+      // Select "world" (PM 7..12)
+      const withSelection = state.apply(
+        state.tr.setSelection(TextSelection.create(state.doc, 7, 12)),
+      );
+
+      const slice = textSlice("there");
+      const result = plugin.props.handlePaste?.(
+        {
+          state: withSelection,
+          dispatch: (tr) => { dispatched = withSelection.apply(tr); },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        {} as ClipboardEvent,
+        slice,
+      );
+      expect(result).toBe(true);
+      expect(dispatched).not.toBeNull();
+      // "world" should have deletion mark, "there" should have addition mark
+      expect(hasMarkAtPos(dispatched!, 7, "criticDeletion")).toBe(true);
+    });
+
+    it("preserves paragraph structure from multi-line paste", () => {
+      const state = createState("hello", 6);
+      const plugin = state.plugins[0];
+      let dispatched: EditorState | null = null;
+
+      const slice = multiLineSlice(["line1", "line2"]);
+      const result = plugin.props.handlePaste?.(
+        {
+          state,
+          dispatch: (tr) => { dispatched = state.apply(tr); },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        {} as ClipboardEvent,
+        slice,
+      );
+      expect(result).toBe(true);
+      expect(dispatched).not.toBeNull();
+      // Should have multiple paragraphs now
+      expect(dispatched!.doc.childCount).toBe(2);
+      expect(dispatched!.doc.child(0).textContent).toBe("helloline1");
+      expect(dispatched!.doc.child(1).textContent).toBe("line2");
     });
   });
 });
